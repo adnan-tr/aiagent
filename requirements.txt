@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+langchain
+pandas
+scikit-learn
+sentence-transformers
+python-multipart
+httpx
