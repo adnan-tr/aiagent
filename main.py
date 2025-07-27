@@ -18,26 +18,40 @@ df['Specs'] = (
 )
 df['text'] = df['Product Name'] + " " + df['Specs']
 
-# HuggingFace embedding model
-HF_API_URL = "https://api-inference.huggingface.co/models/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-HF_API_KEY = "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"
-HEADERS = {"Authorization": f"Bearer {HF_API_KEY}"}
+# OpenRouter config
+OPENROUTER_API_KEY = "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"
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+HEADERS = {
+    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+    "HTTP-Referer": "https://yourdomain.com",
+    "Content-Type": "application/json"
+}
+
+def get_embedding(text: str) -> np.ndarray:
+    prompt = f"Convert this to a 10-dimensional numerical embedding only, no explanation:\n\n{text}"
+    body = {
+        "model": "mistralai/mixtral-8x7b",
+        "messages": [
+            {"role": "user", "content": prompt}
+        ]
+    }
+    response = httpx.post(OPENROUTER_URL, headers=HEADERS, json=body, timeout=30.0)
+    response.raise_for_status()
+    result = response.json()
+    vector_text = result['choices'][0]['message']['content']
+    vector = [float(x.strip()) for x in vector_text.strip("[]").split(",")]
+    return np.array(vector)
 
 # Precompute product embeddings
-def get_embedding(texts):
-    response = httpx.post(HF_API_URL, headers=HEADERS, json={"inputs": texts})
-    response.raise_for_status()
-    return np.array(response.json())
-
-embeddings = get_embedding(df['text'].tolist())
+product_embeddings = np.array([get_embedding(text) for text in df['text']])
 
 class MatchRequest(BaseModel):
     query: str
 
 @app.post("/match")
 async def match_product(req: MatchRequest):
-    query_emb = get_embedding([req.query])
-    scores = cosine_similarity(query_emb, embeddings)[0]
+    query_vec = get_embedding(req.query)
+    scores = cosine_similarity([query_vec], product_embeddings)[0]
     top_indices = np.argsort(scores)[::-1][:3]
     results = df.iloc[top_indices][['Product Code', 'Product Name', 'Specs']].to_dict(orient="records")
     return {"matches": results}
